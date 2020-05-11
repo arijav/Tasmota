@@ -1156,11 +1156,11 @@ void CmndTimeAllowRampupSet(void)
     uint8_t ctr_output = XdrvMailbox.index - 1;
     if (XdrvMailbox.data_len > 0) {
       uint32_t value = (uint32_t)(XdrvMailbox.payload);
-      if ((value >= 0) && (value < 86400)) {
-        Thermostat[ctr_output].time_allow_rampup = (uint16_t)(value / 60);
+      if ((value >= 0) && (value < 1440)) {
+        Thermostat[ctr_output].time_allow_rampup = (uint16_t)value;
       }
     }
-    ResponseCmndNumber((int)((uint32_t)Thermostat[ctr_output].time_allow_rampup * 60));
+    ResponseCmndNumber((int)((uint32_t)Thermostat[ctr_output].time_allow_rampup));
   }
 }
 
