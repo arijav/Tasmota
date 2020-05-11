@@ -1049,6 +1049,8 @@ void CmndClimateModeSet(void)
       uint8_t value = (uint8_t)(CharToFloat(XdrvMailbox.data));
       if ((value >= CLIMATE_HEATING) && (value < CLIMATE_MODES_MAX)) {
         Thermostat[ctr_output].status.climate_mode = value;
+        // Trigger a restart of the controller
+        Thermostat[ctr_output].time_ctr_checkpoint = uptime;
       }
     }
     ResponseCmndNumber((int)Thermostat[ctr_output].status.climate_mode);
