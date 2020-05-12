@@ -75,14 +75,12 @@
 enum ThermostatModes { THERMOSTAT_OFF, THERMOSTAT_AUTOMATIC_OP, THERMOSTAT_MANUAL_OP, THERMOSTAT_MODES_MAX };
 #ifdef USE_PI_AUTOTUNING
 enum ControllerModes { CTR_HYBRID, CTR_PI, CTR_RAMP_UP, CTR_PI_AUTOTUNE, CTR_MODES_MAX };
+enum ControllerHybridPhases { CTR_HYBRID_RAMP_UP, CTR_HYBRID_PI, CTR_HYBRID_PI_AUTOTUNE };
+enum AutotuneStates { AUTOTUNE_OFF, AUTOTUNE_ON };
 #else
 enum ControllerModes { CTR_HYBRID, CTR_PI, CTR_RAMP_UP, CTR_MODES_MAX };
-#endif
-#ifdef USE_PI_AUTOTUNING
-enum ControllerHybridPhases { CTR_HYBRID_RAMP_UP, CTR_HYBRID_PI, CTR_HYBRID_PI_AUTOTUNE };
-#else
 enum ControllerHybridPhases { CTR_HYBRID_RAMP_UP, CTR_HYBRID_PI };
-#endif
+#endif // USE_PI_AUTOTUNING
 enum ClimateModes { CLIMATE_HEATING, CLIMATE_COOLING, CLIMATE_MODES_MAX };
 enum InterfaceStates { IFACE_OFF, IFACE_ON };
 enum InputUsage { INPUT_NOT_USED, INPUT_USED };
@@ -124,16 +122,28 @@ typedef union {
     uint32_t status_output : 1;         // Flag stating state of the output (0 = inactive, 1 = active)
     uint32_t status_input : 1;          // Flag stating state of the input (0 = inactive, 1 = active)
     uint32_t use_input : 1;             // Flag stating if the input switch shall be used to switch to manual mode
-    uint32_t phase_hybrid_ctr : 2;      // Phase of the hybrid controller (Ramp-up or PI)
+    uint32_t phase_hybrid_ctr : 2;      // Phase of the hybrid controller (Ramp-up, PI or Autotune)
     uint32_t status_cycle_active : 1;   // Status showing if cycle is active (Output ON) or not (Output OFF)
-    uint32_t state_emergency : 1;       // State for thermostat emergency
     uint32_t counter_seconds : 6;       // Second counter used to track minutes
     uint32_t output_relay_number : 4;   // Output relay number
     uint32_t input_switch_number : 3;   // Input switch number
-    uint32_t output_inconsist_ctr : 2;  // Counter of the minutes where the output state is inconsistent with the command
-    uint32_t diagnostic_mode : 1;       // Diagnostic mode selected
+  #ifdef USE_PI_AUTOTUNING
+    uint32_t autotune_flag : 1;         // Enable/disable autotune
+    uint32_t free : 3;                  // Free bits
+  #else
+    uint32_t free : 4;                  // Free bits
+  #endif // USE_PI_AUTOTUNING
   };
-} ThermostatBitfield;
+} ThermostatStateBitfield;
+
+typedef union {
+  uint8_t data;
+  struct {
+    uint8_t state_emergency : 1;       // State for thermostat emergency
+    uint8_t diagnostic_mode : 1;       // Diagnostic mode selected
+    uint8_t output_inconsist_ctr : 2;  // Counter of the minutes where the output state is inconsistent with the command
+  };
+} ThermostatDiagBitfield;
 
 #ifdef DEBUG_THERMOSTAT
 const char DOMOTICZ_MES[] PROGMEM = "{\"idx\":%d,\"nvalue\":%d,\"svalue\":\"%s\"}";
@@ -160,7 +170,7 @@ void (* const ThermostatCommand[])(void) PROGMEM = {
   &CmndTimePiProportRead, &CmndTimePiIntegrRead, &CmndTimeSensLostSet, &CmndDiagnosticModeSet };
 
 struct THERMOSTAT {
-  ThermostatBitfield status;                                                  // Bittfield including states as well as several flags
+  ThermostatStateBitfield status;                                             // Bittfield including states as well as several flags
   uint32_t timestamp_temp_measured_update = 0;                                // Timestamp of latest measurement update
   uint32_t timestamp_temp_meas_change_update = 0;                             // Timestamp of latest measurement value change (> or < to previous)
   uint32_t timestamp_output_off = 0;                                          // Timestamp of latest thermostat output Off state
@@ -205,15 +215,17 @@ struct THERMOSTAT {
   uint8_t temp_reset_anti_windup = THERMOSTAT_TEMP_RESET_ANTI_WINDUP;         // Range where reset antiwindup is disabled, in tenths of degrees celsius
   int8_t temp_hysteresis = THERMOSTAT_TEMP_HYSTERESIS;                        // Range hysteresis for temperature PI controller, in tenths of degrees celsius
   uint8_t temp_frost_protect = THERMOSTAT_TEMP_FROST_PROTECT;                 // Minimum temperature for frost protection, in tenths of degrees celsius
+  ThermostatDiagBitfield diag;                                                // Bittfield including diagnostic flags
 #ifdef USE_PI_AUTOTUNING
-  uint8_t dutycycle_step_autotune = THERMOSTAT_DUTYCYCLE_AUTOTUNE;            // Duty cycle for the step response of the autotune PI function
   uint16_t pU_pi_atune = 0;                                                   // pU value ("Ultimate" period) period of self-sustaining oscillations determined when the controller gain was set to Ku in minutes (for PI autotune)
   uint16_t kP_pi_atune = 0;                                                   // kP value calculated by the autotune PI function multiplied by 100 (to avoid floating point operations)
   uint16_t kI_pi_atune = 0;                                                   // kI value calulated by the autotune PI function multiplied by 100 (to avoid floating point operations)
   uint16_t kU_pi_atune = 0;                                                   // kU value ("Ultimate" gain) determined by increasing controller gain until self-sustaining oscillations are achieved (for PI autotune)
   int16_t temp_peaks_atune[THERMOSTAT_PEAKNUMBER_AUTOTUNE];                   // Array to store temperature peaks to be used by the autotune PI function
   uint16_t time_peak_periods_atune[(THERMOSTAT_PEAKNUMBER_AUTOTUNE / 2)];     // Array to store time periods among temperature peaks to be used by the autotune PI function
-#endif
+  uint8_t dutycycle_step_autotune = THERMOSTAT_DUTYCYCLE_AUTOTUNE;            // Duty cycle for the step response of the autotune PI function
+  uint8_t peak_ctr = 0;                                                       // Peak counter for the autotuning function
+#endif // USE_PI_AUTOTUNING
 } Thermostat[THERMOSTAT_CONTROLLER_OUTPUTS];
 
 /*********************************************************************************************/
@@ -231,13 +243,16 @@ void ThermostatInit(uint8_t ctr_output)
   Thermostat[ctr_output].status.status_output = IFACE_OFF;
   Thermostat[ctr_output].status.phase_hybrid_ctr = CTR_HYBRID_PI;
   Thermostat[ctr_output].status.status_cycle_active = CYCLE_OFF;
-  Thermostat[ctr_output].status.state_emergency = EMERGENCY_OFF;
+  Thermostat[ctr_output].diag.state_emergency = EMERGENCY_OFF;
   Thermostat[ctr_output].status.counter_seconds = 0;
   Thermostat[ctr_output].status.output_relay_number = (THERMOSTAT_RELAY_NUMBER + ctr_output);
   Thermostat[ctr_output].status.input_switch_number = (THERMOSTAT_SWITCH_NUMBER + ctr_output);
   Thermostat[ctr_output].status.use_input = INPUT_NOT_USED;
-  Thermostat[ctr_output].status.output_inconsist_ctr = 0;
-  Thermostat[ctr_output].status.diagnostic_mode = DIAGNOSTIC_ON;
+  Thermostat[ctr_output].diag.output_inconsist_ctr = 0;
+  Thermostat[ctr_output].diag.diagnostic_mode = DIAGNOSTIC_ON;
+#ifdef USE_PI_AUTOTUNING
+  Thermostat[ctr_output].status.autotune_flag = AUTOTUNE_OFF;
+#endif // USE_PI_AUTOTUNING
   // Make sure the Output is OFF
   ExecuteCommandPower(Thermostat[ctr_output].status.output_relay_number, POWER_OFF, SRC_THERMOSTAT);
 }
@@ -331,10 +346,10 @@ void ThermostatSignalPostProcessingSlow(uint8_t ctr_output)
 {
   // Increate counter when inconsistent output state exists
   if (Thermostat[ctr_output].status.status_output != Thermostat[ctr_output].status.command_output) {
-    Thermostat[ctr_output].status.output_inconsist_ctr++;
+    Thermostat[ctr_output].diag.output_inconsist_ctr++;
   }
   else {
-    Thermostat[ctr_output].status.output_inconsist_ctr = 0;
+    Thermostat[ctr_output].diag.output_inconsist_ctr = 0;
   }
 }
 
@@ -352,6 +367,10 @@ void ThermostatSignalProcessingFast(uint8_t ctr_output)
 
 void ThermostatCtrState(uint8_t ctr_output)
 {
+#ifdef USE_PI_AUTOTUNING
+  bool flag_heating = (Thermostat[ctr_output].status.climate_mode == CLIMATE_HEATING);
+#endif //USE_PI_AUTOTUNING
+
   switch (Thermostat[ctr_output].status.controller_mode) {
     // Hybrid controller (Ramp-up + PI)
     case CTR_HYBRID:
@@ -360,8 +379,18 @@ void ThermostatCtrState(uint8_t ctr_output)
     // PI controller
     case CTR_PI:
 #ifdef USE_PI_AUTOTUNING
-      // TODO: Function call with conditions for transition to PI Autotune
-#endif
+      // If Autotune has been enabled (via flag)
+      // AND we have just reached the setpoint temperature
+      // AND the temperature gradient is negative for heating and positive for cooling
+      // then switch state to PI autotuning
+      if ((Thermostat[ctr_output].status.autotune_flag == AUTOTUNE_ON)
+        &&(Thermostat[ctr_output].temp_measured == Thermostat[ctr_output].temp_target_level)
+        && ((flag_heating && (Thermostat[ctr_output].temp_measured_gradient < 0))
+          ||(!flag_heating && (Thermostat[ctr_output].temp_measured_gradient > 0))))
+      {
+        Thermostat[ctr_output].status.controller_mode = CTR_PI_AUTOTUNE;
+      }
+#endif // USE_PI_AUTOTUNING
       break;
     // Ramp-up controller (predictive)
     case CTR_RAMP_UP:
@@ -369,9 +398,14 @@ void ThermostatCtrState(uint8_t ctr_output)
 #ifdef USE_PI_AUTOTUNING
     // PI autotune
     case CTR_PI_AUTOTUNE:
-      // TODO: Function call with conditions for transition PI
+      // If autotune finalized (flag Off)
+      // then go back to the PI controller
+      if (Thermostat[ctr_output].status.autotune_flag == AUTOTUNE_OFF)
+      {
+        Thermostat[ctr_output].status.controller_mode = CTR_PI;
+      }
       break;
-#endif
+#endif //USE_PI_AUTOTUNING
   }
 }
 
@@ -416,15 +450,30 @@ void ThermostatHybridCtrPhase(uint8_t ctr_output)
               Thermostat[ctr_output].status.phase_hybrid_ctr = CTR_HYBRID_RAMP_UP;
           }
 #ifdef USE_PI_AUTOTUNING
-          // TODO: Function call with conditions for transition autotune
-#endif
+          // If Autotune has been enabled (via flag)
+          // AND we have just reached the setpoint temperature
+          // AND the temperature gradient is negative for heating and positive for cooling
+          // then switch state to PI autotuning
+          if ((Thermostat[ctr_output].status.autotune_flag == AUTOTUNE_ON)
+            &&(Thermostat[ctr_output].temp_measured == Thermostat[ctr_output].temp_target_level)
+            && ((flag_heating && (Thermostat[ctr_output].temp_measured_gradient < 0))
+              ||(!flag_heating && (Thermostat[ctr_output].temp_measured_gradient > 0))))
+          {
+            Thermostat[ctr_output].status.phase_hybrid_ctr = CTR_HYBRID_PI_AUTOTUNE;
+          }
+#endif // USE_PI_AUTOTUNING
         break;
 #ifdef USE_PI_AUTOTUNING
         // PI autotune controller phase
       case CTR_HYBRID_PI_AUTOTUNE:
-        // TODO: Function call with conditions for transition PI
-        break;
-#endif
+        // If autotune finalized (flag Off)
+        // then go back to the PI controller
+        if (Thermostat[ctr_output].status.autotune_flag == AUTOTUNE_OFF)
+        {
+          Thermostat[ctr_output].status.phase_hybrid_ctr = CTR_HYBRID_PI;
+        }
+      break;        break;
+#endif // USE_PI_AUTOTUNING
     }
   }
 #ifdef DEBUG_THERMOSTAT
@@ -916,17 +965,17 @@ void ThermostatWork(uint8_t ctr_output)
 void ThermostatDiagnostics(uint8_t ctr_output)
 { 
   // Diagnostic related to the plausibility of the output state
-  if ((Thermostat[ctr_output].status.diagnostic_mode == DIAGNOSTIC_ON)
-    &&(Thermostat[ctr_output].status.output_inconsist_ctr >= THERMOSTAT_TIME_MAX_OUTPUT_INCONSIST)) {
+  if ((Thermostat[ctr_output].diag.diagnostic_mode == DIAGNOSTIC_ON)
+    &&(Thermostat[ctr_output].diag.output_inconsist_ctr >= THERMOSTAT_TIME_MAX_OUTPUT_INCONSIST)) {
     Thermostat[ctr_output].status.thermostat_mode = THERMOSTAT_OFF;
-    Thermostat[ctr_output].status.state_emergency = EMERGENCY_ON;  
+    Thermostat[ctr_output].diag.state_emergency = EMERGENCY_ON;  
   }
 
   // Diagnostic related to the plausibility of the output power implemented 
   // already into the energy driver
 
   // If diagnostics fail, emergency enabled and thermostat shutdown triggered
-  if (Thermostat[ctr_output].status.state_emergency == EMERGENCY_ON) {
+  if (Thermostat[ctr_output].diag.state_emergency == EMERGENCY_ON) {
     ThermostatEmergencyShutdown(ctr_output);
   }
 }
@@ -984,10 +1033,10 @@ void ThermostatDebug(uint8_t ctr_output)
   AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].status.counter_seconds: %s"), result_chr);
   dtostrfd(Thermostat[ctr_output].status.thermostat_mode, 0, result_chr);
   AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].status.thermostat_mode: %s"), result_chr);
-  dtostrfd(Thermostat[ctr_output].status.state_emergency, 0, result_chr);
-  AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].status.state_emergency: %s"), result_chr);
-  dtostrfd(Thermostat[ctr_output].status.output_inconsist_ctr, 0, result_chr);
-  AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].status.output_inconsist_ctr: %s"), result_chr);
+  dtostrfd(Thermostat[ctr_output].diag.state_emergency, 0, result_chr);
+  AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].diag.state_emergency: %s"), result_chr);
+  dtostrfd(Thermostat[ctr_output].diag.output_inconsist_ctr, 0, result_chr);
+  AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].diag.output_inconsist_ctr: %s"), result_chr);
   dtostrfd(Thermostat[ctr_output].status.controller_mode, 0, result_chr);
   AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].status.controller_mode: %s"), result_chr);
   dtostrfd(Thermostat[ctr_output].status.command_output, 0, result_chr);
@@ -1305,10 +1354,10 @@ void CmndStateEmergencySet(void)
     if (XdrvMailbox.data_len > 0) {
       uint8_t value = (uint8_t)(XdrvMailbox.payload);
       if ((value >= 0) && (value <= 1)) {
-        Thermostat[ctr_output].status.state_emergency = (uint16_t)value;
+        Thermostat[ctr_output].diag.state_emergency = (uint16_t)value;
       }
     }
-    ResponseCmndNumber((int)Thermostat[ctr_output].status.state_emergency);
+    ResponseCmndNumber((int)Thermostat[ctr_output].diag.state_emergency);
   }
 }
 
@@ -1610,10 +1659,10 @@ void CmndDiagnosticModeSet(void)
     if (XdrvMailbox.data_len > 0) {
       uint8_t value = (uint8_t)(CharToFloat(XdrvMailbox.data));
       if ((value >= DIAGNOSTIC_OFF) && (value <= DIAGNOSTIC_ON)) {
-        Thermostat[ctr_output].status.diagnostic_mode = value;
+        Thermostat[ctr_output].diag.diagnostic_mode = value;
       }
     }
-    ResponseCmndNumber((int)Thermostat[ctr_output].status.diagnostic_mode);
+    ResponseCmndNumber((int)Thermostat[ctr_output].diag.diagnostic_mode);
   }
 }
 
