@@ -223,8 +223,10 @@ struct THERMOSTAT {
   uint16_t kU_pi_atune = 0;                                                   // kU value ("Ultimate" gain) determined by increasing controller gain until self-sustaining oscillations are achieved (for PI autotune)
   int16_t temp_peaks_atune[THERMOSTAT_PEAKNUMBER_AUTOTUNE];                   // Array to store temperature peaks to be used by the autotune PI function
   uint16_t time_peak_periods_atune[(THERMOSTAT_PEAKNUMBER_AUTOTUNE / 2)];     // Array to store time periods among temperature peaks to be used by the autotune PI function
-  uint8_t dutycycle_step_autotune = THERMOSTAT_DUTYCYCLE_AUTOTUNE;            // Duty cycle for the step response of the autotune PI function
+  uint16_t time_std_dev_peak_det_ok = THERMOSTAT_TIME_STD_DEV_PEAK_DET_OK;    // Standard deviation in minutes of the oscillation periods within the peak detection is successful
+  uint8_t dutycycle_step_autotune = THERMOSTAT_DUTYCYCLE_AUTOTUNE;            // Duty cycle for the step response of the autotune PI function in %
   uint8_t peak_ctr = 0;                                                       // Peak counter for the autotuning function
+  uint8_t temp_band_no_peak_det = THERMOSTAT_TEMP_BAND_NO_PEAK_DET;           // Temperature band in thenths of degrees celsius within no peak will be detected
 #endif // USE_PI_AUTOTUNING
 } Thermostat[THERMOSTAT_CONTROLLER_OUTPUTS];
 
@@ -472,7 +474,7 @@ void ThermostatHybridCtrPhase(uint8_t ctr_output)
         {
           Thermostat[ctr_output].status.phase_hybrid_ctr = CTR_HYBRID_PI;
         }
-      break;        break;
+      break;        
 #endif // USE_PI_AUTOTUNING
     }
   }
@@ -916,6 +918,44 @@ void ThermostatWorkAutomaticRampUp(uint8_t ctr_output)
   }
 }
 
+#ifdef USE_PI_AUTOTUNING
+
+void ThermostatPeakDetector(uint8_t ctr_output)
+{
+  // For 
+}
+
+void ThermostatWorkAutomaticPIAutotune(uint8_t ctr_output)
+{
+  bool flag_heating = (Thermostat[ctr_output].status.climate_mode == CLIMATE_HEATING);
+  if (uptime >= Thermostat[ctr_output].time_ctr_checkpoint) {
+    Thermostat[ctr_output].temp_target_level_ctr = Thermostat[ctr_output].temp_target_level;    
+    // Calculate time_ctr_changepoint
+    Thermostat[ctr_output].time_ctr_changepoint = uptime + (((uint32_t)Thermostat[ctr_output].time_pi_cycle * (uint32_t)Thermostat[ctr_output].dutycycle_step_autotune) / (uint32_t)100);
+    // Reset cycle active
+    Thermostat[ctr_output].status.status_cycle_active = CYCLE_OFF;
+  }
+  // Set Output On/Off depending on the changepoint
+  if (uptime < Thermostat[ctr_output].time_ctr_changepoint) {
+    Thermostat[ctr_output].status.status_cycle_active = CYCLE_ON;
+    Thermostat[ctr_output].status.command_output = IFACE_ON;
+  }
+  else {
+    Thermostat[ctr_output].status.command_output = IFACE_OFF;
+  }
+  // Update peak values
+  ThermostatPeakDetector(ctr_output);
+
+  // Evaluate if kU, pU can be calculated
+
+  // Output conditions:
+  // If Thermostat[ctr_output].temp_target_level_ctr != Thermostat[ctr_output].temp_target_level -> Disable Autotune Flag
+  // If timeout (check which existing variable to use) -> Disable Autotune flag
+  // If calculation of Kp_autotune & Ki_autotune done -> Disable Autotune flag
+  // Before going out -> Thermostat[ctr_output].status.peak_ctr = 0;
+}
+#endif //USE_PI_AUTOTUNING
+
 void ThermostatCtrWork(uint8_t ctr_output)
 {
   switch (Thermostat[ctr_output].status.controller_mode) {
@@ -928,6 +968,12 @@ void ThermostatCtrWork(uint8_t ctr_output)
         case CTR_HYBRID_PI:
           ThermostatWorkAutomaticPI(ctr_output);
           break;
+#ifdef USE_PI_AUTOTUNING
+        // PI autotune
+        case CTR_HYBRID_PI_AUTOTUNE:
+          ThermostatWorkAutomaticPIAutotune(ctr_output);
+          break;
+#endif //USE_PI_AUTOTUNING
       }
       break;
     // PI controller
@@ -938,6 +984,12 @@ void ThermostatCtrWork(uint8_t ctr_output)
     case CTR_RAMP_UP:
       ThermostatWorkAutomaticRampUp(ctr_output);
       break;
+#ifdef USE_PI_AUTOTUNING
+    // PI autotune
+    case CTR_PI_AUTOTUNE:
+      ThermostatWorkAutomaticPIAutotune(ctr_output);
+      break;
+#endif //USE_PI_AUTOTUNING
   }
 }
 
@@ -1178,6 +1230,14 @@ void CmndControllerModeSet(void)
       uint8_t value = (uint8_t)(XdrvMailbox.payload);
       if ((value >= CTR_HYBRID) && (value < CTR_MODES_MAX)) {
         Thermostat[ctr_output].status.controller_mode = value;
+        // Reset controller variables
+        Thermostat[ctr_output].timestamp_rampup_start = uptime;
+        Thermostat[ctr_output].temp_rampup_start = Thermostat[ctr_output].temp_measured;
+        Thermostat[ctr_output].temp_rampup_meas_gradient = 0;
+        Thermostat[ctr_output].time_rampup_deadtime = 0;
+        Thermostat[ctr_output].counter_rampup_cycles = 1;
+        Thermostat[ctr_output].time_ctr_changepoint = 0;
+        Thermostat[ctr_output].time_ctr_checkpoint = 0;
       }
     }
     ResponseCmndNumber((int)Thermostat[ctr_output].status.controller_mode);
