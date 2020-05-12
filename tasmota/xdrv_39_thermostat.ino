@@ -24,6 +24,9 @@
 // Enable/disable debugging
 //#define DEBUG_THERMOSTAT
 
+// Enable/disable experimental PI auto-tuning
+//#define USE_PI_AUTOTUNING // (Ziegler-Nichols closed loop method)
+
 #ifdef DEBUG_THERMOSTAT
 #define DOMOTICZ_MAX_IDX     4
 #define DOMOTICZ_IDX1        791
@@ -70,8 +73,16 @@
 #define D_CMND_DIAGNOSTICMODESET "DiagnosticModeSet"
 
 enum ThermostatModes { THERMOSTAT_OFF, THERMOSTAT_AUTOMATIC_OP, THERMOSTAT_MANUAL_OP, THERMOSTAT_MODES_MAX };
+#ifdef USE_PI_AUTOTUNING
+enum ControllerModes { CTR_HYBRID, CTR_PI, CTR_RAMP_UP, CTR_PI_AUTOTUNE, CTR_MODES_MAX };
+#else
 enum ControllerModes { CTR_HYBRID, CTR_PI, CTR_RAMP_UP, CTR_MODES_MAX };
+#endif
+#ifdef USE_PI_AUTOTUNING
+enum ControllerHybridPhases { CTR_HYBRID_RAMP_UP, CTR_HYBRID_PI, CTR_HYBRID_PI_AUTOTUNE };
+#else
 enum ControllerHybridPhases { CTR_HYBRID_RAMP_UP, CTR_HYBRID_PI };
+#endif
 enum ClimateModes { CLIMATE_HEATING, CLIMATE_COOLING, CLIMATE_MODES_MAX };
 enum InterfaceStates { IFACE_OFF, IFACE_ON };
 enum InputUsage { INPUT_NOT_USED, INPUT_USED };
@@ -113,7 +124,7 @@ typedef union {
     uint32_t status_output : 1;         // Flag stating state of the output (0 = inactive, 1 = active)
     uint32_t status_input : 1;          // Flag stating state of the input (0 = inactive, 1 = active)
     uint32_t use_input : 1;             // Flag stating if the input switch shall be used to switch to manual mode
-    uint32_t phase_hybrid_ctr : 1;      // Phase of the hybrid controller (Ramp-up or PI)
+    uint32_t phase_hybrid_ctr : 2;      // Phase of the hybrid controller (Ramp-up or PI)
     uint32_t status_cycle_active : 1;   // Status showing if cycle is active (Output ON) or not (Output OFF)
     uint32_t state_emergency : 1;       // State for thermostat emergency
     uint32_t counter_seconds : 6;       // Second counter used to track minutes
@@ -121,7 +132,6 @@ typedef union {
     uint32_t input_switch_number : 3;   // Input switch number
     uint32_t output_inconsist_ctr : 2;  // Counter of the minutes where the output state is inconsistent with the command
     uint32_t diagnostic_mode : 1;       // Diagnostic mode selected
-    uint32_t free : 1;                  // Free bits in Bitfield
   };
 } ThermostatBitfield;
 
@@ -167,7 +177,7 @@ struct THERMOSTAT {
   int32_t time_integral_pi;                                                   // Time integral part of the PI controller
   int32_t time_total_pi;                                                      // Time total (proportional + integral) of the PI controller
   uint16_t kP_pi = 0;                                                         // kP value for the PI controller multiplied by 100 (to avoid floating point operations)
-  uint16_t kI_pi = 0;                                                         // kP value for the PI controller multiplied by 100 (to avoid floating point operations)
+  uint16_t kI_pi = 0;                                                         // kI value for the PI controller multiplied by 100 (to avoid floating point operations)
   int32_t temp_rampup_meas_gradient = 0;                                      // Temperature measured gradient from sensor in thousandths of degrees celsius per hour calculated during ramp-up
   uint32_t timestamp_rampup_start = 0;                                        // Timestamp where the ramp-up controller mode has been started
   uint32_t time_rampup_deadtime = 0;                                          // Time constant of the thermostat system (step response time)
@@ -195,6 +205,15 @@ struct THERMOSTAT {
   uint8_t temp_reset_anti_windup = THERMOSTAT_TEMP_RESET_ANTI_WINDUP;         // Range where reset antiwindup is disabled, in tenths of degrees celsius
   int8_t temp_hysteresis = THERMOSTAT_TEMP_HYSTERESIS;                        // Range hysteresis for temperature PI controller, in tenths of degrees celsius
   uint8_t temp_frost_protect = THERMOSTAT_TEMP_FROST_PROTECT;                 // Minimum temperature for frost protection, in tenths of degrees celsius
+#ifdef USE_PI_AUTOTUNING
+  uint8_t dutycycle_step_autotune = THERMOSTAT_DUTYCYCLE_AUTOTUNE;            // Duty cycle for the step response of the autotune PI function
+  uint16_t pU_pi_atune = 0;                                                   // pU value ("Ultimate" period) period of self-sustaining oscillations determined when the controller gain was set to Ku in minutes (for PI autotune)
+  uint16_t kP_pi_atune = 0;                                                   // kP value calculated by the autotune PI function multiplied by 100 (to avoid floating point operations)
+  uint16_t kI_pi_atune = 0;                                                   // kI value calulated by the autotune PI function multiplied by 100 (to avoid floating point operations)
+  uint16_t kU_pi_atune = 0;                                                   // kU value ("Ultimate" gain) determined by increasing controller gain until self-sustaining oscillations are achieved (for PI autotune)
+  int16_t temp_peaks_atune[THERMOSTAT_PEAKNUMBER_AUTOTUNE];                   // Array to store temperature peaks to be used by the autotune PI function
+  uint16_t time_peak_periods_atune[(THERMOSTAT_PEAKNUMBER_AUTOTUNE / 2)];     // Array to store time periods among temperature peaks to be used by the autotune PI function
+#endif
 } Thermostat[THERMOSTAT_CONTROLLER_OUTPUTS];
 
 /*********************************************************************************************/
@@ -340,10 +359,19 @@ void ThermostatCtrState(uint8_t ctr_output)
       break;
     // PI controller
     case CTR_PI:
+#ifdef USE_PI_AUTOTUNING
+      // TODO: Function call with conditions for transition to PI Autotune
+#endif
       break;
     // Ramp-up controller (predictive)
     case CTR_RAMP_UP:
       break;
+#ifdef USE_PI_AUTOTUNING
+    // PI autotune
+    case CTR_PI_AUTOTUNE:
+      // TODO: Function call with conditions for transition PI
+      break;
+#endif
   }
 }
 
@@ -387,7 +415,16 @@ void ThermostatHybridCtrPhase(uint8_t ctr_output)
               Thermostat[ctr_output].time_ctr_checkpoint = 0;
               Thermostat[ctr_output].status.phase_hybrid_ctr = CTR_HYBRID_RAMP_UP;
           }
+#ifdef USE_PI_AUTOTUNING
+          // TODO: Function call with conditions for transition autotune
+#endif
         break;
+#ifdef USE_PI_AUTOTUNING
+        // PI autotune controller phase
+      case CTR_HYBRID_PI_AUTOTUNE:
+        // TODO: Function call with conditions for transition PI
+        break;
+#endif
     }
   }
 #ifdef DEBUG_THERMOSTAT
