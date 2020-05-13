@@ -176,7 +176,7 @@ struct THERMOSTAT {
   uint32_t timestamp_output_off = 0;                                          // Timestamp of latest thermostat output Off state
   uint32_t timestamp_input_on = 0;                                            // Timestamp of latest input On state
   uint32_t time_thermostat_total = 0;                                         // Time thermostat on within a specific timeframe
-  uint32_t time_ctr_checkpoint = 0;                                           // Time to finalize the control cycle within the PI strategy or to switch to PI from Rampup
+  uint32_t time_ctr_checkpoint = 0;                                           // Time to finalize the control cycle within the PI strategy or to switch to PI from Rampup in seconds
   uint32_t time_ctr_changepoint = 0;                                          // Time until switching off output within the controller in seconds
   int32_t temp_measured_gradient = 0;                                         // Temperature measured gradient from sensor in thousandths of degrees per hour
   int16_t temp_target_level = THERMOSTAT_TEMP_INIT;                           // Target level of the thermostat in tenths of degrees
@@ -222,6 +222,8 @@ struct THERMOSTAT {
   uint16_t kI_pi_atune = 0;                                                   // kI value calulated by the autotune PI function multiplied by 100 (to avoid floating point operations)
   uint16_t kU_pi_atune = 0;                                                   // kU value ("Ultimate" gain) determined by increasing controller gain until self-sustaining oscillations are achieved (for PI autotune)
   int16_t temp_peaks_atune[THERMOSTAT_PEAKNUMBER_AUTOTUNE];                   // Array to store temperature peaks to be used by the autotune PI function
+  int16_t temp_abs_max_atune;                                                 // Max temperature reached within autotune
+  int16_t temp_abs_min_atune;                                                 // Min temperature reached within autotune
   uint16_t time_peak_periods_atune[(THERMOSTAT_PEAKNUMBER_AUTOTUNE / 2)];     // Array to store time periods among temperature peaks to be used by the autotune PI function
   uint16_t time_std_dev_peak_det_ok = THERMOSTAT_TIME_STD_DEV_PEAK_DET_OK;    // Standard deviation in minutes of the oscillation periods within the peak detection is successful
   uint8_t dutycycle_step_autotune = THERMOSTAT_DUTYCYCLE_AUTOTUNE;            // Duty cycle for the step response of the autotune PI function in %
@@ -391,6 +393,7 @@ void ThermostatCtrState(uint8_t ctr_output)
           ||(!flag_heating && (Thermostat[ctr_output].temp_measured_gradient > 0))))
       {
         Thermostat[ctr_output].status.controller_mode = CTR_PI_AUTOTUNE;
+        ThermostatPeakDetectorInit(ctr_output);
       }
 #endif // USE_PI_AUTOTUNING
       break;
@@ -462,6 +465,7 @@ void ThermostatHybridCtrPhase(uint8_t ctr_output)
               ||(!flag_heating && (Thermostat[ctr_output].temp_measured_gradient > 0))))
           {
             Thermostat[ctr_output].status.phase_hybrid_ctr = CTR_HYBRID_PI_AUTOTUNE;
+            ThermostatPeakDetectorInit(ctr_output);
           }
 #endif // USE_PI_AUTOTUNING
         break;
@@ -920,39 +924,164 @@ void ThermostatWorkAutomaticRampUp(uint8_t ctr_output)
 
 #ifdef USE_PI_AUTOTUNING
 
+void ThermostatPeakDetectorInit(uint8_t ctr_output)
+{
+  for (uint8_t i = 0; i < THERMOSTAT_PEAKNUMBER_AUTOTUNE; i++) {
+    Thermostat[ctr_output].temp_peaks_atune[i] = 0;
+  }
+  Thermostat[ctr_output].pU_pi_atune = 0;
+  Thermostat[ctr_output].kP_pi_atune = 0;
+  Thermostat[ctr_output].kI_pi_atune = 0;
+  Thermostat[ctr_output].kU_pi_atune = 0;     
+  Thermostat[ctr_output].peak_ctr = 0; 
+  Thermostat[ctr_output].temp_abs_max_atune = 0;
+  Thermostat[ctr_output].temp_abs_min_atune = 100;
+  Thermostat[ctr_output].time_ctr_checkpoint = uptime + THERMOSTAT_TIME_MAX_AUTOTUNE;
+}
+
 void ThermostatPeakDetector(uint8_t ctr_output)
 {
-  // For 
+  uint8_t peak_num = Thermostat[ctr_output].peak_ctr;
+  int16_t peak_avg = 0;
+  bool peak_transition = false;
+  // Update Max/Min Thermostat[ctr_output].temp_abs_max_atune
+  if (Thermostat[ctr_output].temp_measured > Thermostat[ctr_output].temp_abs_max_atune) {
+    Thermostat[ctr_output].temp_abs_max_atune = Thermostat[ctr_output].temp_measured;
+  }
+  if (Thermostat[ctr_output].temp_measured < Thermostat[ctr_output].temp_abs_min_atune) {
+    Thermostat[ctr_output].temp_abs_min_atune = Thermostat[ctr_output].temp_measured;
+  }  
+  // For heating, even peak numbers look for maxes, odd for minds, the contrary for cooling
+  // If we did not found all peaks yet
+  if (peak_num < THERMOSTAT_PEAKNUMBER_AUTOTUNE) {
+    bool flag_heating = (Thermostat[ctr_output].status.climate_mode == CLIMATE_HEATING);
+    bool cond_peak_1 = (   (Thermostat[ctr_output].temp_measured > Thermostat[ctr_output].temp_peaks_atune[peak_num])
+                        && (flag_heating)
+                      ||   (Thermostat[ctr_output].temp_measured < Thermostat[ctr_output].temp_peaks_atune[peak_num])
+                        && (!flag_heating));
+    bool cond_peak_2 = (   (Thermostat[ctr_output].temp_measured < Thermostat[ctr_output].temp_peaks_atune[peak_num])
+                        && (flag_heating)
+                      ||   (Thermostat[ctr_output].temp_measured > Thermostat[ctr_output].temp_peaks_atune[peak_num])
+                        && (!flag_heating));
+    bool cond_gradient_1 = (   (Thermostat[ctr_output].temp_measured_gradient > 0)
+                            && (flag_heating)
+                          ||   (Thermostat[ctr_output].temp_measured_gradient < 0)
+                            && (!flag_heating));
+    bool cond_gradient_2 = (   (Thermostat[ctr_output].temp_measured_gradient < 0)
+                            && (flag_heating)
+                          ||   (Thermostat[ctr_output].temp_measured_gradient > 0)
+                            && (!flag_heating));
+    // If peak number is even (look for max if heating and min if cooling)
+    if ((peak_num % 2) == 0) {
+      // If current temperature higher (heating) or lower (cooling) than registered value for peak
+      // AND temperature gradient > 0 for heating or < 0 for cooling
+      // then, update value
+      if (cond_peak_1 && cond_gradient_1) {
+        Thermostat[ctr_output].temp_peaks_atune[peak_num] = Thermostat[ctr_output].temp_measured;
+      }
+      // Else if current temperature lower (heating) or higher (cooling) then registered value for peak
+      // AND difference to peak is outside of the peak no detection band
+      // then the current peak value is the peak (max for heating, min for cooling), switch detection
+      if ( (cond_peak_2)
+        && (abs(Thermostat[ctr_output].temp_measured - Thermostat[ctr_output].temp_peaks_atune[peak_num]) > Thermostat[ctr_output].temp_band_no_peak_det)) {
+        Thermostat[ctr_output].peak_ctr++;
+        peak_transition = true;
+      }
+    }
+    // Peak number is odd (look for min if heating and max if cooling)
+    else {
+      // If current temperature lower (heating) or higher (cooling) than registered value for peak
+      // AND temperature gradient < 0 for heating or > 0 for cooling
+      // then, update value
+      if (cond_peak_2 && cond_gradient_2) {
+        Thermostat[ctr_output].temp_peaks_atune[peak_num] = Thermostat[ctr_output].temp_measured;
+      }
+      // Else if current temperature higher (heating) or lower (cooling) then registered value for peak
+      // AND difference to peak is outside of the peak no detection band
+      // then the current peak value is the peak (min for heating, max for cooling), switch detection
+      if ( (cond_peak_1)
+        && (abs(Thermostat[ctr_output].temp_measured - Thermostat[ctr_output].temp_peaks_atune[peak_num]) > Thermostat[ctr_output].temp_band_no_peak_det)) {
+        Thermostat[ctr_output].peak_ctr++;
+        peak_transition = true;
+      }
+    }
+  }
+  else {
+    // Peak detection done, proceed to evaluate results
+    ThermostatAutotuneParamCalc(ctr_output);
+  }
+  
+  // If peak detection not finalized but bigger than 3 and we have just found a peak, check if results can be extracted
+  if ((Thermostat[ctr_output].peak_ctr > 2) && (peak_transition)) {
+    //Update peak_num
+    peak_num = Thermostat[ctr_output].peak_ctr;
+    // Calculate average value among the last 3 peaks
+    peak_avg = (abs(Thermostat[ctr_output].temp_peaks_atune[peak_num - 1] 
+                    - Thermostat[ctr_output].temp_peaks_atune[peak_num - 2])
+              + abs(Thermostat[ctr_output].temp_peaks_atune[peak_num - 2] 
+                    - Thermostat[ctr_output].temp_peaks_atune[peak_num - 3])) / 2;
+      
+    if ((20 * (int32_t)peak_avg) < (int32_t)(Thermostat[ctr_output].temp_abs_max_atune - Thermostat[ctr_output].temp_abs_min_atune)) {
+      // Calculate average temperature among all peaks
+      for (uint8_t i = 0; i < peak_num; i++) {
+        peak_avg += Thermostat[ctr_output].temp_peaks_atune[i];
+      }
+      peak_avg /= peak_num;
+      // If last period crosses the average value, result valid
+      if (10 * abs(Thermostat[ctr_output].temp_peaks_atune[peak_num -1] - Thermostat[ctr_output].temp_peaks_atune[peak_num - 2]) < (Thermostat[ctr_output].temp_abs_max_atune - peak_avg)) {
+        // Peak detection done, proceed to evaluate results
+        ThermostatAutotuneParamCalc(ctr_output);
+      }
+    }
+  }
+  peak_transition = false;
+}
+
+void ThermostatAutotuneParamCalc(uint8_t ctr_output)
+{
+  
 }
 
 void ThermostatWorkAutomaticPIAutotune(uint8_t ctr_output)
 {
   bool flag_heating = (Thermostat[ctr_output].status.climate_mode == CLIMATE_HEATING);
-  if (uptime >= Thermostat[ctr_output].time_ctr_checkpoint) {
-    Thermostat[ctr_output].temp_target_level_ctr = Thermostat[ctr_output].temp_target_level;    
-    // Calculate time_ctr_changepoint
-    Thermostat[ctr_output].time_ctr_changepoint = uptime + (((uint32_t)Thermostat[ctr_output].time_pi_cycle * (uint32_t)Thermostat[ctr_output].dutycycle_step_autotune) / (uint32_t)100);
-    // Reset cycle active
-    Thermostat[ctr_output].status.status_cycle_active = CYCLE_OFF;
-  }
-  // Set Output On/Off depending on the changepoint
-  if (uptime < Thermostat[ctr_output].time_ctr_changepoint) {
-    Thermostat[ctr_output].status.status_cycle_active = CYCLE_ON;
-    Thermostat[ctr_output].status.command_output = IFACE_ON;
+  // If no timeout of the PI Autotune function
+  if (uptime < Thermostat[ctr_output].time_ctr_checkpoint) {
+    if (uptime >= Thermostat[ctr_output].time_ctr_checkpoint) {
+      Thermostat[ctr_output].temp_target_level_ctr = Thermostat[ctr_output].temp_target_level;    
+      // Calculate time_ctr_changepoint
+      Thermostat[ctr_output].time_ctr_changepoint = uptime + (((uint32_t)Thermostat[ctr_output].time_pi_cycle * (uint32_t)Thermostat[ctr_output].dutycycle_step_autotune) / (uint32_t)100);
+      // Reset cycle active
+      Thermostat[ctr_output].status.status_cycle_active = CYCLE_OFF;
+    }
+    // Set Output On/Off depending on the changepoint
+    if (uptime < Thermostat[ctr_output].time_ctr_changepoint) {
+      Thermostat[ctr_output].status.status_cycle_active = CYCLE_ON;
+      Thermostat[ctr_output].status.command_output = IFACE_ON;
+    }
+    else {
+      Thermostat[ctr_output].status.command_output = IFACE_OFF;
+    }
+    // Update peak values
+    ThermostatPeakDetector(ctr_output);
   }
   else {
+    // Disable Autotune flag
+    Thermostat[ctr_output].status.autotune_flag = AUTOTUNE_OFF;
+  }
+
+  if (Thermostat[ctr_output].status.autotune_flag == AUTOTUNE_OFF) {
+    // Set output Off
     Thermostat[ctr_output].status.command_output = IFACE_OFF;
   }
-  // Update peak values
-  ThermostatPeakDetector(ctr_output);
-
+  
   // Evaluate if kU, pU can be calculated
 
   // Output conditions:
   // If Thermostat[ctr_output].temp_target_level_ctr != Thermostat[ctr_output].temp_target_level -> Disable Autotune Flag
   // If timeout (check which existing variable to use) -> Disable Autotune flag
   // If calculation of Kp_autotune & Ki_autotune done -> Disable Autotune flag
-  // Before going out -> Thermostat[ctr_output].status.peak_ctr = 0;
+  // Before starting call ThermostatPeakDetectorInit()
 }
 #endif //USE_PI_AUTOTUNING
 
