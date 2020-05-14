@@ -59,6 +59,9 @@
 #define D_CMND_TIMEPICYCLESET "TimePiCycleSet"
 #define D_CMND_TEMPANTIWINDUPRESETSET "TempAntiWindupResetSet"
 #define D_CMND_TEMPHYSTSET "TempHystSet"
+#ifdef USE_PI_AUTOTUNING
+#define D_CMND_PERFLEVELAUTOTUNE "PerfLevelAutotune"
+#endif // USE_PI_AUTOTUNING
 #define D_CMND_TIMEMAXACTIONSET "TimeMaxActionSet"
 #define D_CMND_TIMEMINACTIONSET "TimeMinActionSet"
 #define D_CMND_TIMEMINTURNOFFACTIONSET "TimeMinTurnoffActionSet"
@@ -76,7 +79,8 @@ enum ThermostatModes { THERMOSTAT_OFF, THERMOSTAT_AUTOMATIC_OP, THERMOSTAT_MANUA
 #ifdef USE_PI_AUTOTUNING
 enum ControllerModes { CTR_HYBRID, CTR_PI, CTR_RAMP_UP, CTR_PI_AUTOTUNE, CTR_MODES_MAX };
 enum ControllerHybridPhases { CTR_HYBRID_RAMP_UP, CTR_HYBRID_PI, CTR_HYBRID_PI_AUTOTUNE };
-enum AutotuneStates { AUTOTUNE_OFF, AUTOTUNE_ON };
+enum AutotuneStates { AUTOTUNE_OFF, AUTOTUNE_ON, AUTOTUNE_MAX };
+enum AutotunePerformanceParam { AUTOTUNE_PERF_FAST, AUTOTUNE_PERF_NORMAL, AUTOTUNE_PERF_SLOW, AUTOTUNE_PERF_MAX };
 #else
 enum ControllerModes { CTR_HYBRID, CTR_PI, CTR_RAMP_UP, CTR_MODES_MAX };
 enum ControllerHybridPhases { CTR_HYBRID_RAMP_UP, CTR_HYBRID_PI };
@@ -127,12 +131,13 @@ typedef union {
     uint32_t counter_seconds : 6;       // Second counter used to track minutes
     uint32_t output_relay_number : 4;   // Output relay number
     uint32_t input_switch_number : 3;   // Input switch number
-  #ifdef USE_PI_AUTOTUNING
+#ifdef USE_PI_AUTOTUNING
     uint32_t autotune_flag : 1;         // Enable/disable autotune
-    uint32_t free : 3;                  // Free bits
-  #else
+    uint32_t autotune_perf_mode : 2;    // Autotune performance mode
+    uint32_t free : 1;                  // Free bits
+#else
     uint32_t free : 4;                  // Free bits
-  #endif // USE_PI_AUTOTUNING
+#endif // USE_PI_AUTOTUNING
   };
 } ThermostatStateBitfield;
 
@@ -155,17 +160,25 @@ const char kThermostatCommands[] PROGMEM = "|" D_CMND_THERMOSTATMODESET "|" D_CM
   D_CMND_OUTPUTRELAYSET "|" D_CMND_TIMEALLOWRAMPUPSET "|" D_CMND_TEMPFORMATSET "|" D_CMND_TEMPMEASUREDSET "|" 
   D_CMND_TEMPTARGETSET "|" D_CMND_TEMPMEASUREDGRDREAD "|" D_CMND_SENSORINPUTSET "|" D_CMND_STATEEMERGENCYSET "|" 
   D_CMND_TIMEMANUALTOAUTOSET "|" D_CMND_PROPBANDSET "|" D_CMND_TIMERESETSET "|" D_CMND_TIMEPICYCLESET "|" 
-  D_CMND_TEMPANTIWINDUPRESETSET "|" D_CMND_TEMPHYSTSET "|" D_CMND_TIMEMAXACTIONSET "|" D_CMND_TIMEMINACTIONSET "|" 
-  D_CMND_TIMEMINTURNOFFACTIONSET "|" D_CMND_TEMPRUPDELTINSET "|" D_CMND_TEMPRUPDELTOUTSET "|" D_CMND_TIMERAMPUPMAXSET "|" 
-  D_CMND_TIMERAMPUPCYCLESET "|" D_CMND_TEMPRAMPUPPIACCERRSET "|" D_CMND_TIMEPIPROPORTREAD "|" D_CMND_TIMEPIINTEGRREAD "|" 
-  D_CMND_TIMESENSLOSTSET "|" D_CMND_DIAGNOSTICMODESET;
+#ifdef USE_PI_AUTOTUNING
+  D_CMND_TEMPANTIWINDUPRESETSET "|" D_CMND_TEMPHYSTSET "|" D_CMND_PERFLEVELAUTOTUNE "|" D_CMND_TIMEMAXACTIONSET "|" 
+#else
+  D_CMND_TEMPANTIWINDUPRESETSET "|" D_CMND_TEMPHYSTSET "|" D_CMND_TIMEMAXACTIONSET "|" 
+#endif // USE_PI_AUTOTUNING
+  D_CMND_TIMEMINACTIONSET "|" D_CMND_TIMEMINTURNOFFACTIONSET "|" D_CMND_TEMPRUPDELTINSET "|" D_CMND_TEMPRUPDELTOUTSET "|" 
+  D_CMND_TIMERAMPUPMAXSET "|" D_CMND_TIMERAMPUPCYCLESET "|" D_CMND_TEMPRAMPUPPIACCERRSET "|" D_CMND_TIMEPIPROPORTREAD "|" 
+  D_CMND_TIMEPIINTEGRREAD "|" D_CMND_TIMESENSLOSTSET "|" D_CMND_DIAGNOSTICMODESET;
 
 void (* const ThermostatCommand[])(void) PROGMEM = {
   &CmndThermostatModeSet, &CmndClimateModeSet, &CmndTempFrostProtectSet, &CmndControllerModeSet, &CmndInputSwitchSet, 
   &CmndInputSwitchUse, &CmndOutputRelaySet, &CmndTimeAllowRampupSet, &CmndTempFormatSet, &CmndTempMeasuredSet, 
   &CmndTempTargetSet, &CmndTempMeasuredGrdRead, &CmndSensorInputSet, &CmndStateEmergencySet, &CmndTimeManualToAutoSet, 
   &CmndPropBandSet, &CmndTimeResetSet, &CmndTimePiCycleSet, &CmndTempAntiWindupResetSet, &CmndTempHystSet, 
+#ifdef USE_PI_AUTOTUNING
+  &CmndPerfLevelAutotune, &CmndTimeMaxActionSet, &CmndTimeMinActionSet, &CmndTimeMinTurnoffActionSet, &CmndTempRupDeltInSet, 
+#else
   &CmndTimeMaxActionSet, &CmndTimeMinActionSet, &CmndTimeMinTurnoffActionSet, &CmndTempRupDeltInSet, 
+#endif // USE_PI_AUTOTUNING
   &CmndTempRupDeltOutSet, &CmndTimeRampupMaxSet, &CmndTimeRampupCycleSet, &CmndTempRampupPiAccErrSet, 
   &CmndTimePiProportRead, &CmndTimePiIntegrRead, &CmndTimeSensLostSet, &CmndDiagnosticModeSet };
 
@@ -217,18 +230,20 @@ struct THERMOSTAT {
   uint8_t temp_frost_protect = THERMOSTAT_TEMP_FROST_PROTECT;                 // Minimum temperature for frost protection, in tenths of degrees celsius
   ThermostatDiagBitfield diag;                                                // Bittfield including diagnostic flags
 #ifdef USE_PI_AUTOTUNING
-  uint16_t pU_pi_atune = 0;                                                   // pU value ("Ultimate" period) period of self-sustaining oscillations determined when the controller gain was set to Ku in minutes (for PI autotune)
-  uint16_t kP_pi_atune = 0;                                                   // kP value calculated by the autotune PI function multiplied by 100 (to avoid floating point operations)
-  uint16_t kI_pi_atune = 0;                                                   // kI value calulated by the autotune PI function multiplied by 100 (to avoid floating point operations)
-  uint16_t kU_pi_atune = 0;                                                   // kU value ("Ultimate" gain) determined by increasing controller gain until self-sustaining oscillations are achieved (for PI autotune)
-  int16_t temp_peaks_atune[THERMOSTAT_PEAKNUMBER_AUTOTUNE];                   // Array to store temperature peaks to be used by the autotune PI function
-  int16_t temp_abs_max_atune;                                                 // Max temperature reached within autotune
-  int16_t temp_abs_min_atune;                                                 // Min temperature reached within autotune
-  uint16_t time_peak_periods_atune[(THERMOSTAT_PEAKNUMBER_AUTOTUNE / 2)];     // Array to store time periods among temperature peaks to be used by the autotune PI function
-  uint16_t time_std_dev_peak_det_ok = THERMOSTAT_TIME_STD_DEV_PEAK_DET_OK;    // Standard deviation in minutes of the oscillation periods within the peak detection is successful
   uint8_t dutycycle_step_autotune = THERMOSTAT_DUTYCYCLE_AUTOTUNE;            // Duty cycle for the step response of the autotune PI function in %
   uint8_t peak_ctr = 0;                                                       // Peak counter for the autotuning function
   uint8_t temp_band_no_peak_det = THERMOSTAT_TEMP_BAND_NO_PEAK_DET;           // Temperature band in thenths of degrees celsius within no peak will be detected
+  uint8_t val_prop_band_atune = 0;                                            // Proportional band calculated from the the PI autotune function in degrees celsius
+  uint32_t time_reset_atune = 0;                                              // Reset time calculated from the PI autotune function in seconds
+  uint16_t pU_pi_atune = 0;                                                   // pU value ("Ultimate" period) period of self-sustaining oscillations determined when the controller gain was set to Ku in minutes (for PI autotune)
+  uint16_t kU_pi_atune = 0;                                                   // kU value ("Ultimate" gain) determined by increasing controller gain until self-sustaining oscillations are achieved (for PI autotune)
+  uint16_t kP_pi_atune = 0;                                                   // kP value calculated by the autotune PI function multiplied by 100 (to avoid floating point operations)
+  uint16_t kI_pi_atune = 0;                                                   // kI value calulated by the autotune PI function multiplied by 100 (to avoid floating point operations)
+  int16_t temp_peaks_atune[THERMOSTAT_PEAKNUMBER_AUTOTUNE];                   // Array to store temperature peaks to be used by the autotune PI function
+  int16_t temp_abs_max_atune;                                                 // Max temperature reached within autotune
+  int16_t temp_abs_min_atune;                                                 // Min temperature reached within autotune
+  uint16_t time_peak_timestamps_atune[THERMOSTAT_PEAKNUMBER_AUTOTUNE];        // Array to store timestamps in minutes of the temperature peaks to be used by the autotune PI function
+  uint16_t time_std_dev_peak_det_ok = THERMOSTAT_TIME_STD_DEV_PEAK_DET_OK;    // Standard deviation in minutes of the oscillation periods within the peak detection is successful
 #endif // USE_PI_AUTOTUNING
 } Thermostat[THERMOSTAT_CONTROLLER_OUTPUTS];
 
@@ -256,6 +271,7 @@ void ThermostatInit(uint8_t ctr_output)
   Thermostat[ctr_output].diag.diagnostic_mode = DIAGNOSTIC_ON;
 #ifdef USE_PI_AUTOTUNING
   Thermostat[ctr_output].status.autotune_flag = AUTOTUNE_OFF;
+  Thermostat[ctr_output].status.autotune_perf_mode = AUTOTUNE_PERF_FAST;
 #endif // USE_PI_AUTOTUNING
   // Make sure the Output is OFF
   ExecuteCommandPower(Thermostat[ctr_output].status.output_relay_number, POWER_OFF, SRC_THERMOSTAT);
@@ -984,6 +1000,8 @@ void ThermostatPeakDetector(uint8_t ctr_output)
       // then the current peak value is the peak (max for heating, min for cooling), switch detection
       if ( (cond_peak_2)
         && (abs(Thermostat[ctr_output].temp_measured - Thermostat[ctr_output].temp_peaks_atune[peak_num]) > Thermostat[ctr_output].temp_band_no_peak_det)) {
+        // Register peak timestamp;
+        Thermostat[ctr_output].time_peak_timestamps_atune[peak_num] = (uptime / 60); 
         Thermostat[ctr_output].peak_ctr++;
         peak_transition = true;
       }
@@ -1001,6 +1019,9 @@ void ThermostatPeakDetector(uint8_t ctr_output)
       // then the current peak value is the peak (min for heating, max for cooling), switch detection
       if ( (cond_peak_1)
         && (abs(Thermostat[ctr_output].temp_measured - Thermostat[ctr_output].temp_peaks_atune[peak_num]) > Thermostat[ctr_output].temp_band_no_peak_det)) {
+        // Calculate period 
+        // Register peak timestamp;
+        Thermostat[ctr_output].time_peak_timestamps_atune[peak_num] = (uptime / 60); 
         Thermostat[ctr_output].peak_ctr++;
         peak_transition = true;
       }
@@ -1028,7 +1049,7 @@ void ThermostatPeakDetector(uint8_t ctr_output)
       }
       peak_avg /= peak_num;
       // If last period crosses the average value, result valid
-      if (10 * abs(Thermostat[ctr_output].temp_peaks_atune[peak_num -1] - Thermostat[ctr_output].temp_peaks_atune[peak_num - 2]) < (Thermostat[ctr_output].temp_abs_max_atune - peak_avg)) {
+      if (10 * abs(Thermostat[ctr_output].temp_peaks_atune[peak_num - 1] - Thermostat[ctr_output].temp_peaks_atune[peak_num - 2]) < (Thermostat[ctr_output].temp_abs_max_atune - peak_avg)) {
         // Peak detection done, proceed to evaluate results
         ThermostatAutotuneParamCalc(ctr_output);
       }
@@ -1039,7 +1060,35 @@ void ThermostatPeakDetector(uint8_t ctr_output)
 
 void ThermostatAutotuneParamCalc(uint8_t ctr_output)
 {
+  uint8_t peak_num = Thermostat[ctr_output].peak_ctr;
+
+  // Calculate the tunning parameters
+  // Resolution increased to avoid float operations
+  Thermostat[ctr_output].kU_pi_atune = (uint16_t)(100 * ((uint32_t)400000 * (uint32_t)(Thermostat[ctr_output].dutycycle_step_autotune)) / ((uint32_t)(Thermostat[ctr_output].temp_abs_max_atune - Thermostat[ctr_output].temp_abs_min_atune) * (uint32_t)314159));
+  Thermostat[ctr_output].pU_pi_atune = (Thermostat[ctr_output].time_peak_timestamps_atune[peak_num - 1] - Thermostat[ctr_output].time_peak_timestamps_atune[peak_num - 2]);
   
+  switch (Thermostat[ctr_output].status.autotune_perf_mode) {
+    case AUTOTUNE_PERF_FAST:
+      // Calculate kP/Ki autotune
+      Thermostat[ctr_output].kP_pi_atune = (4 * Thermostat[ctr_output].kU_pi_atune) / 10;
+      break;
+    case AUTOTUNE_PERF_NORMAL:
+      // Calculate kP/Ki autotune
+      Thermostat[ctr_output].kP_pi_atune = (18 * Thermostat[ctr_output].kU_pi_atune) / 100;
+      break;
+    case AUTOTUNE_PERF_SLOW:
+      // Calculate kP/Ki autotune
+      Thermostat[ctr_output].kP_pi_atune = (13 * Thermostat[ctr_output].kU_pi_atune) / 100;
+      break;
+  }
+
+  // Resolution increased to avoid float operations
+  Thermostat[ctr_output].kI_pi_atune = (12 * (6000 * Thermostat[ctr_output].kU_pi_atune / Thermostat[ctr_output].pU_pi_atune)) / 10;
+
+  // Calculate PropBand Autotune
+  Thermostat[ctr_output].val_prop_band_atune = 100 / Thermostat[ctr_output].kP_pi_atune;
+  // Calculate Reset Time Autotune
+  Thermostat[ctr_output].time_reset_atune = (uint32_t)((((uint32_t)Thermostat[ctr_output].kP_pi_atune * (uint32_t)Thermostat[ctr_output].time_pi_cycle * 6000)) / (uint32_t)Thermostat[ctr_output].kI_pi_atune);
 }
 
 void ThermostatWorkAutomaticPIAutotune(uint8_t ctr_output)
@@ -1675,6 +1724,22 @@ void CmndTempHystSet(void)
     ResponseCmndFloat((float)value / 10, 1);
   }
 }
+
+#ifdef USE_PI_AUTOTUNING
+void CmndPerfLevelAutotune(void)
+{
+  if ((XdrvMailbox.index > 0) && (XdrvMailbox.index <= THERMOSTAT_CONTROLLER_OUTPUTS)) {
+    uint8_t ctr_output = XdrvMailbox.index - 1;
+    if (XdrvMailbox.data_len > 0) {
+      uint8_t value = (uint8_t)(XdrvMailbox.payload);
+      if ((value >= 0) && (value <= AUTOTUNE_PERF_MAX)) {
+        Thermostat[ctr_output].status.autotune_perf_mode = value;
+      }
+    }
+    ResponseCmndNumber((int)Thermostat[ctr_output].status.autotune_perf_mode);
+  }
+}
+#endif // USE_PI_AUTOTUNING
 
 void CmndTimeMaxActionSet(void)
 {
