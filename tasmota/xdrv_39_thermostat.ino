@@ -1325,6 +1325,8 @@ void ThermostatDebug(uint8_t ctr_output)
   AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].temp_measured_gradient: %s"), result_chr);
   dtostrfd(Thermostat[ctr_output].time_rampup_deadtime, 0, result_chr);
   AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].time_rampup_deadtime: %s"), result_chr);
+  dtostrfd(Thermostat[ctr_output].time_rampup_lagtime, 0, result_chr);
+  AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].time_rampup_lagtime: %s"), result_chr);
   dtostrfd(Thermostat[ctr_output].temp_rampup_meas_gradient, 0, result_chr);
   AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].temp_rampup_meas_gradient: %s"), result_chr);
   dtostrfd(Thermostat[ctr_output].time_ctr_changepoint, 0, result_chr);
