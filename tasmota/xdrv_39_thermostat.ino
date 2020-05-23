@@ -898,7 +898,7 @@ void ThermostatWorkAutomaticRampUp(uint8_t ctr_output)
         // Better Alternative -> (y-y1)/(x-x1) = ((y2-y1)/(x2-x1)) -> where y = temp (target) and x = time (to switch off, what its needed)
         // x = ((y-y1)/(y2-y1))*(x2-x1) + x1 - deadtime        
         aux_temp_delta =Thermostat[ctr_output].temp_target_level_ctr - Thermostat[ctr_output].temp_rampup_cycle;
-        Thermostat[ctr_output].time_ctr_changepoint = (uint32_t)(uint32_t)(((uint32_t)(aux_temp_delta) * (uint32_t)(time_total_rampup)) / (uint32_t)temp_delta_rampup) + (uint32_t)Thermostat[ctr_output].time_rampup_nextcycle - (uint32_t)time_total_rampup - (uint32_t)Thermostat[ctr_output].time_rampup_lagtime;
+        Thermostat[ctr_output].time_ctr_changepoint = (uint32_t)(uint32_t)(((uint32_t)(aux_temp_delta) * (uint32_t)(time_total_rampup)) / (uint32_t)temp_delta_rampup) + (uint32_t)Thermostat[ctr_output].time_rampup_nextcycle - (uint32_t)time_total_rampup - (uint32_t)(Thermostat[ctr_output].time_rampup_lagtime + (int32_t)Thermostat[ctr_output].time_rampup_deadtime);
 
         // Calculate temperature for switching off the output
         // y = (((y2-y1)/(x2-x1))*(x-x1)) + y1
@@ -921,11 +921,10 @@ void ThermostatWorkAutomaticRampUp(uint8_t ctr_output)
     }
 
     // If gradient > 0 for heating or <= and gradient < 0 for cooling
-    if (((Thermostat[ctr_output].temp_rampup_meas_gradient > 0)
-      && (flag_heating))
-    ||  ((Thermostat[ctr_output].temp_rampup_peak <= Thermostat[ctr_output].temp_rampup_start)
-      && (Thermostat[ctr_output].temp_rampup_meas_gradient < 0)
-      && (!flag_heating))) {
+    if ((  (Thermostat[ctr_output].temp_rampup_meas_gradient > 0)
+        && (flag_heating))
+      ||  ((Thermostat[ctr_output].temp_rampup_meas_gradient < 0)
+        && (!flag_heating))) {
       // Ramp-up phase needs to be extended until real peak is reached
       Thermostat[ctr_output].time_ctr_checkpoint = uptime + Thermostat[ctr_output].time_rampup_cycle;
     }
