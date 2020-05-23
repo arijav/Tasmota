@@ -920,10 +920,10 @@ void ThermostatWorkAutomaticRampUp(uint8_t ctr_output)
       }
     }
 
-    // If gradient > 0 for heating or <= and gradient < 0 for cooling
-    if ((  (Thermostat[ctr_output].temp_rampup_meas_gradient > 0)
+    // If gradient >= 0 for heating or <= and gradient < 0 for cooling
+    if ((  (Thermostat[ctr_output].temp_rampup_meas_gradient >= 0)
         && (flag_heating))
-      ||  ((Thermostat[ctr_output].temp_rampup_meas_gradient < 0)
+      ||  ((Thermostat[ctr_output].temp_rampup_meas_gradient <= 0)
         && (!flag_heating))) {
       // Ramp-up phase needs to be extended until real peak is reached
       Thermostat[ctr_output].time_ctr_checkpoint = uptime + Thermostat[ctr_output].time_rampup_cycle;
