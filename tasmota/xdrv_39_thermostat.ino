@@ -932,7 +932,9 @@ void ThermostatWorkAutomaticRampUp(uint8_t ctr_output)
       // Peak reached, get out of ramp-up
       Thermostat[ctr_output].time_ctr_checkpoint = uptime;
       // Update lagtime
-      Thermostat[ctr_output].time_rampup_lagtime = Thermostat[ctr_output].timestamp_rampup_max_temp - Thermostat[ctr_output].time_ctr_changepoint - Thermostat[ctr_output].time_rampup_deadtime;
+      if (Thermostat[ctr_output].timestamp_rampup_max_temp > Thermostat[ctr_output].time_ctr_changepoint) {
+        Thermostat[ctr_output].time_rampup_lagtime = Thermostat[ctr_output].timestamp_rampup_max_temp - Thermostat[ctr_output].time_ctr_changepoint - Thermostat[ctr_output].time_rampup_deadtime;
+      }
     }
 
     // Set output switch ON or OFF
