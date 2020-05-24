@@ -210,7 +210,6 @@ struct THERMOSTAT {
   int32_t time_total_pi;                                                      // Time total (proportional + integral) of the PI controller
   uint16_t kP_pi = 0;                                                         // kP value for the PI controller multiplied by 100 (to avoid floating point operations)
   uint16_t kI_pi = 0;                                                         // kI value for the PI controller multiplied by 100 (to avoid floating point operations)
-  int32_t temp_rampup_meas_gradient = 0;                                      // Temperature measured gradient from sensor in thousandths of degrees celsius per hour calculated during ramp-up
   uint32_t timestamp_rampup_start = 0;                                        // Timestamp where the ramp-up controller mode has been started
   uint32_t timestamp_rampup_max_temp = 0;                                     // Timestamp of the peak temperature reached during rampup
   uint32_t time_rampup_deadtime = 0;                                          // Time delay of the thermostat to react to a step response
@@ -479,11 +478,12 @@ void ThermostatHybridCtrPhase(uint8_t ctr_output)
                 && (!flag_heating)))) {
               Thermostat[ctr_output].timestamp_rampup_start = uptime;
               Thermostat[ctr_output].temp_rampup_start = Thermostat[ctr_output].temp_measured;
-              Thermostat[ctr_output].temp_rampup_meas_gradient = 0;
               Thermostat[ctr_output].time_rampup_deadtime = 0;
               Thermostat[ctr_output].counter_rampup_cycles = 1;
               Thermostat[ctr_output].time_ctr_changepoint = 0;
               Thermostat[ctr_output].time_ctr_checkpoint = 0;
+              Thermostat[ctr_output].temp_rampup_peak = 0;
+              Thermostat[ctr_output].timestamp_rampup_max_temp = 0;
               Thermostat[ctr_output].status.phase_hybrid_ctr = CTR_HYBRID_RAMP_UP;
           }
 #ifdef USE_PI_AUTOTUNING
@@ -874,7 +874,6 @@ void ThermostatWorkAutomaticRampUp(uint8_t ctr_output)
       // Set deadtime   
       Thermostat[ctr_output].time_rampup_deadtime = time_in_rampup;
       // Calculate absolute gradient since start of ramp-up (considering deadtime) in thousandths of º/hour
-      Thermostat[ctr_output].temp_rampup_meas_gradient = (int32_t)((360000 * (int32_t)temp_delta_rampup) / (int32_t)time_in_rampup);
       Thermostat[ctr_output].time_rampup_nextcycle = uptime + ((uint32_t)Thermostat[ctr_output].time_rampup_cycle * 60);
       // Set auxiliary variables
       Thermostat[ctr_output].temp_rampup_cycle = Thermostat[ctr_output].temp_measured;
@@ -884,14 +883,12 @@ void ThermostatWorkAutomaticRampUp(uint8_t ctr_output)
     // Gradient calculation every time_rampup_cycle
     else if ((Thermostat[ctr_output].time_rampup_deadtime > 0) && (uptime >= Thermostat[ctr_output].time_rampup_nextcycle)) {
       // Calculate temp. gradient in º/hour and set again time_rampup_nextcycle and temp_rampup_cycle
-      // temp_rampup_meas_gradient = ((3600 * temp_delta_rampup) / (os.time() - time_rampup_nextcycle))
       temp_delta_rampup = Thermostat[ctr_output].temp_measured - Thermostat[ctr_output].temp_rampup_cycle;
       uint32_t time_total_rampup = (uint32_t)Thermostat[ctr_output].time_rampup_cycle * 60 * Thermostat[ctr_output].counter_rampup_cycles;
       // Translate into gradient per hour (thousandths of ° per hour)
-      Thermostat[ctr_output].temp_rampup_meas_gradient = int32_t((360000 * (int32_t)temp_delta_rampup) / (int32_t)time_total_rampup);
-      if (   ((Thermostat[ctr_output].temp_rampup_meas_gradient > 0)
+      if (   ((Thermostat[ctr_output].temp_measured_gradient > 0)
           && ((flag_heating)))
-        ||   ((Thermostat[ctr_output].temp_rampup_meas_gradient < 0)
+        ||   ((Thermostat[ctr_output].temp_measured_gradient < 0)
           && ((!flag_heating)))) {
         // Calculate time to switch Off and come out of ramp-up
         // y-y1 = m(x-x1) -> x = ((y-y1) / m) + x1 -> y1 = temp_rampup_cycle, x1 = (time_rampup_nextcycle - time_rampup_cycle), m = gradient in º/sec
@@ -921,9 +918,9 @@ void ThermostatWorkAutomaticRampUp(uint8_t ctr_output)
     }
 
     // If gradient >= 0 for heating or <= and gradient < 0 for cooling
-    if ((  (Thermostat[ctr_output].temp_rampup_meas_gradient >= 0)
+    if ((  (Thermostat[ctr_output].temp_measured_gradient >= 0)
         && (flag_heating))
-      ||  ((Thermostat[ctr_output].temp_rampup_meas_gradient <= 0)
+      ||  ((Thermostat[ctr_output].temp_measured_gradient <= 0)
         && (!flag_heating))) {
       // Ramp-up phase needs to be extended until real peak is reached
       Thermostat[ctr_output].time_ctr_checkpoint = uptime + (Thermostat[ctr_output].time_rampup_cycle * 60);
@@ -949,9 +946,9 @@ void ThermostatWorkAutomaticRampUp(uint8_t ctr_output)
           && (flag_heating))
         ||  ((Thermostat[ctr_output].temp_measured > Thermostat[ctr_output].temp_rampup_output_off)
           && (!flag_heating)))
-      || (  ((Thermostat[ctr_output].temp_rampup_meas_gradient <= 0)
+      || (  ((Thermostat[ctr_output].temp_measured_gradient <= 0)
           && (flag_heating))
-        ||  ((Thermostat[ctr_output].temp_rampup_meas_gradient >= 0)
+        ||  ((Thermostat[ctr_output].temp_measured_gradient >= 0)
           && (!flag_heating)))) {
       Thermostat[ctr_output].status.command_output = IFACE_ON;
     }
@@ -1329,12 +1326,12 @@ void ThermostatDebug(uint8_t ctr_output)
   AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].time_rampup_deadtime: %s"), result_chr);
   dtostrfd(Thermostat[ctr_output].time_rampup_lagtime, 0, result_chr);
   AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].time_rampup_lagtime: %s"), result_chr);
-  dtostrfd(Thermostat[ctr_output].temp_rampup_meas_gradient, 0, result_chr);
-  AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].temp_rampup_meas_gradient: %s"), result_chr);
   dtostrfd(Thermostat[ctr_output].time_ctr_changepoint, 0, result_chr);
   AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].time_ctr_changepoint: %s"), result_chr);
   dtostrfd(Thermostat[ctr_output].temp_rampup_output_off, 0, result_chr);
   AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].temp_rampup_output_off: %s"), result_chr);
+  dtostrfd(Thermostat[ctr_output].temp_rampup_peak, 0, result_chr);
+  AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].temp_rampup_peak: %s"), result_chr);
   dtostrfd(Thermostat[ctr_output].time_ctr_checkpoint, 0, result_chr);
   AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].time_ctr_checkpoint: %s"), result_chr);
   dtostrfd(uptime, 0, result_chr);
@@ -1445,11 +1442,12 @@ void CmndControllerModeSet(void)
         // Reset controller variables
         Thermostat[ctr_output].timestamp_rampup_start = uptime;
         Thermostat[ctr_output].temp_rampup_start = Thermostat[ctr_output].temp_measured;
-        Thermostat[ctr_output].temp_rampup_meas_gradient = 0;
         Thermostat[ctr_output].time_rampup_deadtime = 0;
         Thermostat[ctr_output].counter_rampup_cycles = 1;
         Thermostat[ctr_output].time_ctr_changepoint = 0;
         Thermostat[ctr_output].time_ctr_checkpoint = 0;
+        Thermostat[ctr_output].temp_rampup_peak = 0;
+        Thermostat[ctr_output].timestamp_rampup_max_temp = 0;
       }
     }
     ResponseCmndNumber((int)Thermostat[ctr_output].status.controller_mode);
