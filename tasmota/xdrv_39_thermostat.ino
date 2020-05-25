@@ -915,21 +915,24 @@ void ThermostatWorkAutomaticRampUp(uint8_t ctr_output)
         Thermostat[ctr_output].time_ctr_changepoint = uptime + (60 * (uint32_t)Thermostat[ctr_output].time_rampup_max) - time_in_rampup;
         Thermostat[ctr_output].temp_rampup_output_off =  Thermostat[ctr_output].temp_target_level_ctr;
       }
-      // If gradient >= 0 for heating or <= and gradient < 0 for cooling
-      if ((  (Thermostat[ctr_output].temp_measured_gradient >= 0)
+    }
+
+    // If deadtime calculated
+    // AND gradient >= 0 for heating or <= and gradient < 0 for cooling
+    if ((Thermostat[ctr_output].time_rampup_deadtime > 0)
+        &&(  (Thermostat[ctr_output].temp_measured_gradient >= 0)
           && (flag_heating))
         ||  ((Thermostat[ctr_output].temp_measured_gradient <= 0)
           && (!flag_heating))) {
-        // Ramp-up phase needs to be extended until real peak is reached
-        Thermostat[ctr_output].time_ctr_checkpoint = uptime + (Thermostat[ctr_output].time_rampup_cycle * 60);
-      }
-      else {
-        // Peak reached, get out of ramp-up
-        Thermostat[ctr_output].time_ctr_checkpoint = uptime;
-        // Update lagtime
-        if (Thermostat[ctr_output].timestamp_rampup_max_temp > Thermostat[ctr_output].time_ctr_changepoint) {
-          Thermostat[ctr_output].time_rampup_lagtime = Thermostat[ctr_output].timestamp_rampup_max_temp - Thermostat[ctr_output].time_ctr_changepoint - Thermostat[ctr_output].time_rampup_deadtime;
-        }
+      // Ramp-up phase needs to be extended until real peak is reached
+      Thermostat[ctr_output].time_ctr_checkpoint = uptime + (Thermostat[ctr_output].time_rampup_cycle * 60);
+    }
+    else {
+      // Peak reached, get out of ramp-up
+      Thermostat[ctr_output].time_ctr_checkpoint = uptime;
+      // Update lagtime
+      if (Thermostat[ctr_output].timestamp_rampup_max_temp > Thermostat[ctr_output].time_ctr_changepoint) {
+        Thermostat[ctr_output].time_rampup_lagtime = Thermostat[ctr_output].timestamp_rampup_max_temp - Thermostat[ctr_output].time_ctr_changepoint - Thermostat[ctr_output].time_rampup_deadtime;
       }
     }
 
