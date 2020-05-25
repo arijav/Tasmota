@@ -880,7 +880,7 @@ void ThermostatWorkAutomaticRampUp(uint8_t ctr_output)
       Thermostat[ctr_output].time_ctr_changepoint = uptime + (60 * (uint32_t)Thermostat[ctr_output].time_rampup_max);
       Thermostat[ctr_output].temp_rampup_output_off =  Thermostat[ctr_output].temp_target_level_ctr;
     }
-    // Gradient calculation every time_rampup_cycle
+    // Predictive calculation every time_rampup_cycle
     else if ((Thermostat[ctr_output].time_rampup_deadtime > 0) && (uptime >= Thermostat[ctr_output].time_rampup_nextcycle)) {
       // Calculate temp. gradient in º/hour and set again time_rampup_nextcycle and temp_rampup_cycle
       temp_delta_rampup = Thermostat[ctr_output].temp_measured - Thermostat[ctr_output].temp_rampup_cycle;
@@ -915,22 +915,21 @@ void ThermostatWorkAutomaticRampUp(uint8_t ctr_output)
         Thermostat[ctr_output].time_ctr_changepoint = uptime + (60 * (uint32_t)Thermostat[ctr_output].time_rampup_max) - time_in_rampup;
         Thermostat[ctr_output].temp_rampup_output_off =  Thermostat[ctr_output].temp_target_level_ctr;
       }
-    }
-
-    // If gradient >= 0 for heating or <= and gradient < 0 for cooling
-    if ((  (Thermostat[ctr_output].temp_measured_gradient >= 0)
-        && (flag_heating))
-      ||  ((Thermostat[ctr_output].temp_measured_gradient <= 0)
-        && (!flag_heating))) {
-      // Ramp-up phase needs to be extended until real peak is reached
-      Thermostat[ctr_output].time_ctr_checkpoint = uptime + (Thermostat[ctr_output].time_rampup_cycle * 60);
-    }
-    else {
-      // Peak reached, get out of ramp-up
-      Thermostat[ctr_output].time_ctr_checkpoint = uptime;
-      // Update lagtime
-      if (Thermostat[ctr_output].timestamp_rampup_max_temp > Thermostat[ctr_output].time_ctr_changepoint) {
-        Thermostat[ctr_output].time_rampup_lagtime = Thermostat[ctr_output].timestamp_rampup_max_temp - Thermostat[ctr_output].time_ctr_changepoint - Thermostat[ctr_output].time_rampup_deadtime;
+      // If gradient >= 0 for heating or <= and gradient < 0 for cooling
+      if ((  (Thermostat[ctr_output].temp_measured_gradient >= 0)
+          && (flag_heating))
+        ||  ((Thermostat[ctr_output].temp_measured_gradient <= 0)
+          && (!flag_heating))) {
+        // Ramp-up phase needs to be extended until real peak is reached
+        Thermostat[ctr_output].time_ctr_checkpoint = uptime + (Thermostat[ctr_output].time_rampup_cycle * 60);
+      }
+      else {
+        // Peak reached, get out of ramp-up
+        Thermostat[ctr_output].time_ctr_checkpoint = uptime;
+        // Update lagtime
+        if (Thermostat[ctr_output].timestamp_rampup_max_temp > Thermostat[ctr_output].time_ctr_changepoint) {
+          Thermostat[ctr_output].time_rampup_lagtime = Thermostat[ctr_output].timestamp_rampup_max_temp - Thermostat[ctr_output].time_ctr_changepoint - Thermostat[ctr_output].time_rampup_deadtime;
+        }
       }
     }
 
