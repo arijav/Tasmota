@@ -1332,6 +1332,8 @@ void ThermostatDebug(uint8_t ctr_output)
   AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].temp_rampup_output_off: %s"), result_chr);
   dtostrfd(Thermostat[ctr_output].temp_rampup_peak, 0, result_chr);
   AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].temp_rampup_peak: %s"), result_chr);
+  dtostrfd(Thermostat[ctr_output].timestamp_rampup_max_temp, 0, result_chr);
+  AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].timestamp_rampup_max_temp: %s"), result_chr);
   dtostrfd(Thermostat[ctr_output].time_ctr_checkpoint, 0, result_chr);
   AddLog_P2(LOG_LEVEL_DEBUG, PSTR("Thermostat[ctr_output].time_ctr_checkpoint: %s"), result_chr);
   dtostrfd(uptime, 0, result_chr);
