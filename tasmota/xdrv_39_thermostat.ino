@@ -882,19 +882,17 @@ void ThermostatWorkAutomaticRampUp(uint8_t ctr_output)
     }
     // Predictive calculation every time_rampup_cycle
     else if ((Thermostat[ctr_output].time_rampup_deadtime > 0) && (uptime >= Thermostat[ctr_output].time_rampup_nextcycle)) {
-      // Calculate temp. gradient in º/hour and set again time_rampup_nextcycle and temp_rampup_cycle
       temp_delta_rampup = Thermostat[ctr_output].temp_measured - Thermostat[ctr_output].temp_rampup_cycle;
       uint32_t time_total_rampup = (uint32_t)Thermostat[ctr_output].time_rampup_cycle * 60 * Thermostat[ctr_output].counter_rampup_cycles;
-      // Translate into gradient per hour (thousandths of ° per hour)
       if (   ((Thermostat[ctr_output].temp_measured_gradient > 0)
           && ((flag_heating)))
         ||   ((Thermostat[ctr_output].temp_measured_gradient < 0)
           && ((!flag_heating)))) {
-        // Calculate time to switch Off and come out of ramp-up
+        // Calculate time to switch Off
         // y-y1 = m(x-x1) -> x = ((y-y1) / m) + x1 -> y1 = temp_rampup_cycle, x1 = (time_rampup_nextcycle - time_rampup_cycle), m = gradient in º/sec
         // Better Alternative -> (y-y1)/(x-x1) = ((y2-y1)/(x2-x1)) -> where y = temp (target) and x = time (to switch off, what its needed)
         // x = ((y-y1)/(y2-y1))*(x2-x1) + x1 - deadtime        
-        aux_temp_delta =Thermostat[ctr_output].temp_target_level_ctr - Thermostat[ctr_output].temp_rampup_cycle;
+        aux_temp_delta = Thermostat[ctr_output].temp_target_level_ctr - Thermostat[ctr_output].temp_rampup_cycle;
         Thermostat[ctr_output].time_ctr_changepoint = (uint32_t)(uint32_t)(((uint32_t)(aux_temp_delta) * (uint32_t)(time_total_rampup)) / (uint32_t)temp_delta_rampup) + (uint32_t)Thermostat[ctr_output].time_rampup_nextcycle - (uint32_t)time_total_rampup - (uint32_t)(Thermostat[ctr_output].time_rampup_lagtime + (int32_t)Thermostat[ctr_output].time_rampup_deadtime);
 
         // Calculate temperature for switching off the output
@@ -906,13 +904,17 @@ void ThermostatWorkAutomaticRampUp(uint8_t ctr_output)
         // Reset period counter
         Thermostat[ctr_output].counter_rampup_cycles = 1;
       }
-      else {
+      // If gradient is not going in the right direction and we are below the setpoint for heating or above for cooling
+      else if (   ((Thermostat[ctr_output].temp_measured < Thermostat[ctr_output].temp_target_level_ctr)
+          && ((flag_heating)))
+        ||   ((Thermostat[ctr_output].temp_measured > Thermostat[ctr_output].temp_target_level_ctr)
+          && ((!flag_heating)))) {
         // Increase the period counter
         Thermostat[ctr_output].counter_rampup_cycles++;
         // Set another period
         Thermostat[ctr_output].time_rampup_nextcycle = uptime + ((uint32_t)Thermostat[ctr_output].time_rampup_cycle * 60);
         // Reset time_ctr_changepoint and temp_rampup_output_off
-        Thermostat[ctr_output].time_ctr_changepoint = uptime + (60 * (uint32_t)Thermostat[ctr_output].time_rampup_max) - time_in_rampup;
+        Thermostat[ctr_output].time_ctr_changepoint = Thermostat[ctr_output].time_rampup_nextcycle;
         Thermostat[ctr_output].temp_rampup_output_off =  Thermostat[ctr_output].temp_target_level_ctr;
       }
     }
